@@ -1,122 +1,358 @@
 /* =========================================
-   1. HARİTA (LEAFLET) AYARLARI
+   1. HARİTA (MAPLIBRE GL JS) BAŞLATMA
    ========================================= */
-// Haritayı başlatıyoruz, merkezi İstanbul olarak ayarladık
-const map = L.map('map').setView([41.0082, 28.9784], 10); // Enlem, Boylam, Zoom Seviyesi
+const map = new maplibregl.Map({
+    container: 'map',
+    style: {
+        version: 8,
+        sources: {
+            'carto-light': {
+                'type': 'raster',
+                'tiles': [
+                    'https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+                    'https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+                    'https://c.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png'
+                ],
+                'tileSize': 256
+            },
+            'terrainSource': {
+                'type': 'raster-dem',
+                'tiles': ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
+                'encoding': 'terrarium',
+                'tileSize': 256,
+                'maxzoom': 14
+            }
+        },
+        layers: [
+            {
+                'id': 'carto-light-layer',
+                'type': 'raster',
+                'source': 'carto-light',
+                'minzoom': 0,
+                'maxzoom': 22
+            }
+        ],
+        terrain: {
+            source: 'terrainSource',
+            exaggeration: 1.5 // Abartma katsayısı, dağların daha belirgin olması için
+        }
+    },
+    center: [28.9784, 41.0082], // [Boylam, Enlem] (İstanbul Merkezi)
+    zoom: 10,
+    pitch: 60, // 3D görünüm için kamera açısı
+    bearing: -20, // Kameranın bakış yönü
+    maxPitch: 85
+});
 
-// CartoDB Dark Matter harita altlığını ekliyoruz (Modern karanlık görünüm)
-L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-    subdomains: 'abcd',
-    maxZoom: 20
-}).addTo(map);
+// Map kontrolleri eklendi (Zomm in/out, pusula vs)
+map.addControl(new maplibregl.NavigationControl({
+    visualizePitch: true,
+    showZoom: true,
+    showCompass: true
+}), 'top-left');
 
 /* =========================================
    2. PROJ4JS - KOORDİNAT SİSTEMLERİ
    ========================================= */
-// WGS84 (Standart Enlem/Boylam - EPSG:4326) ve Web Mercator (EPSG:3857) Proj4js'te dahili gelir.
-// UTM zonlarına ait EPSG tanımlarını yapalım (Örn: Türkiye için 35N, 36N, 37N)
-
 proj4.defs("EPSG:32635", "+proj=utm +zone=35 +datum=WGS84 +units=m +no_defs");
 proj4.defs("EPSG:32636", "+proj=utm +zone=36 +datum=WGS84 +units=m +no_defs");
 proj4.defs("EPSG:32637", "+proj=utm +zone=37 +datum=WGS84 +units=m +no_defs");
 
-let currentCrs = "EPSG:4326"; // Varsayılan projeksiyon
+let currentCrs = "EPSG:4326";
 
-// Dropdown'dan (Açılır Menü) Seçim Değiştiğinde
-document.getElementById('crsSelect').addEventListener('change', function(e) {
+document.getElementById('crsSelect').addEventListener('change', function (e) {
     currentCrs = e.target.value;
-    updateCoordinateDisplays(); // UI'ı yeni sisteme göre güncelle
+    updateCoordinateDisplays();
 });
 
 /* =========================================
    3. DEĞİŞKENLER VE DOM ELEMANLARI
    ========================================= */
-let markers = []; // Haritaya eklenen pinleri (noktaları) tutacak dizi
-let polyline = null; // İki nokta arasına çizilecek çizgi
+let markers = []; // [marker1, marker2]
+let markerCoords = []; // [[lng1, lat1], [lng2, lat2]]
+let elevationChart = null; // Chart.js nesnesi
+let hoverMarker = null; // Harita üstünde chart hoverı için çıkan işaretçi
 
 const p1CoordsText = document.getElementById('point1-coords');
 const p2CoordsText = document.getElementById('point2-coords');
 const distanceResult = document.getElementById('distance-result');
 const resetBtn = document.getElementById('resetBtn');
+const bottomPanel = document.getElementById('bottom-panel');
+const intervalSelect = document.getElementById('intervalSelect');
+const closeChartBtn = document.getElementById('closeChartBtn');
+
+map.on('load', () => {
+    // Çizgi ve noktalar için boş kaynaklar oluşturuyoruz
+    map.addSource('route', {
+        'type': 'geojson',
+        'data': {
+            'type': 'Feature',
+            'properties': {},
+            'geometry': {
+                'type': 'LineString',
+                'coordinates': []
+            }
+        }
+    });
+
+    // Çizgi (Route) Katmanı
+    map.addLayer({
+        'id': 'route-line',
+        'type': 'line',
+        'source': 'route',
+        'layout': {
+            'line-join': 'round',
+            'line-cap': 'round'
+        },
+        'paint': {
+            'line-color': '#1f2937', // Koyu gri/lacivert (Açık haritada daha iyi görünür)
+            'line-width': 4,
+            'line-dasharray': [2, 2] // Kesik kesik
+        }
+    });
+});
 
 /* =========================================
    4. HARİTAYA TIKLAMA (ÖLÇÜM) MANTIĞI
    ========================================= */
-map.on('click', function(e) {
-    // Haritaya tıklanılan noktanın WGS84 Enlem (lat) ve Boylam (lng) değerleri
-    const latLng = e.latlng; 
+map.on('click', function (e) {
+    const lngLat = [e.lngLat.lng, e.lngLat.lat];
 
-    // İkiden fazla noktaya izin vermiyoruz
-    if (markers.length >= 2) {
-        return; 
-    }
+    if (markers.length >= 2) return;
 
-    // 1. Yeni işaretçi (marker) ekle
-    const marker = L.marker(latLng).addTo(map);
+    // Özel Marker DOM Elemanı oluştur
+    const el = document.createElement('div');
+    el.className = 'custom-marker';
+
+    const marker = new maplibregl.Marker({ element: el })
+        .setLngLat(lngLat)
+        .addTo(map);
+
     markers.push(marker);
+    markerCoords.push(lngLat);
 
-    // 2. Arayüzde Tıklanan Noktanın Koordinatlarını Göster
     updateCoordinateDisplays();
 
-    // 3. Eğer 2 nokta da seçildiyse: Çizgi çiz ve Mesafeyi hesapla
     if (markers.length === 2) {
-        drawPolyline();
-        calculateDistance();
+        drawLineAndCalculate();
+        generateElevationProfile();
     }
 });
 
 /* =========================================
-   5. ÇİZGİ ÇİZME VE MESAFE HESAPLAMA
+   5. ÇİZGİ ÇİZME VE MESAFE HESAPLAMASI
    ========================================= */
-function drawPolyline() {
-    const p1 = markers[0].getLatLng();
-    const p2 = markers[1].getLatLng();
+function drawLineAndCalculate() {
+    // GeoJSON datasını güncelle
+    const geojson = {
+        'type': 'Feature',
+        'properties': {},
+        'geometry': {
+            'type': 'LineString',
+            'coordinates': markerCoords
+        }
+    };
+    if (map.getSource('route')) {
+        map.getSource('route').setData(geojson);
+    }
 
-    polyline = L.polyline([p1, p2], {
-        color: '#00d2ff', // Neon mavi
-        weight: 4,        // Çizgi kalınlığı
-        opacity: 0.8,
-        dashArray: '10, 10' // Kesik kesik çizgi görünümü
-    }).addTo(map);
+    // Turf.js ile Mesafe (Jeodezik)
+    const p1 = turf.point(markerCoords[0]);
+    const p2 = turf.point(markerCoords[1]);
+    const distanceKm = turf.distance(p1, p2, { units: 'kilometers' });
+    const distanceM = distanceKm * 1000;
 
-    // Haritayı çizgiye sığdır (İki noktayı da görebilmek için animasyonlu zoom)
-    map.fitBounds(polyline.getBounds(), { padding: [50, 50], maxZoom: 15 });
+    if (distanceM >= 1000) {
+        distanceResult.innerHTML = `${distanceKm.toFixed(2)} <span>km</span>`;
+    } else {
+        distanceResult.innerHTML = `${distanceM.toFixed(1)} <span>m</span>`;
+    }
+
+    // Kamera'yı çizgiye odakla (Bbox oluştur)
+    const bbox = turf.bbox(geojson);
+    map.fitBounds(bbox, {
+        padding: { top: 50, bottom: 300, left: 50, right: 350 }, // UI panellerine göre padding
+        maxZoom: 15,
+        pitch: 65,  // 3D için açılı
+        speed: 1.5
+    });
 }
 
-function calculateDistance() {
-    const p1 = markers[0].getLatLng();
-    const p2 = markers[1].getLatLng();
+/* =========================================
+   6. 3D KOT (ELEVATION) ANALİZİ VE GRAFİK
+   ========================================= */
+intervalSelect.addEventListener('change', () => {
+    // Sadece eğer aralık değiştirilirse ve iki nokta seçilmişse yeniden çiz
+    if (markers.length === 2) {
+        generateElevationProfile();
+    }
+});
 
-    // Leaflet'in dahili p1.distanceTo(p2) metodu, WGS84 ellipsoid'ine (Vincenty/Haversine formüllerine)
-    // dayanarak gerçek jeodezik fiziksel mesafeyi (metre cinsinden) döndürür. Projeksiyondan bağımsızdır.
-    let distanceInMeters = p1.distanceTo(p2); 
-    
-    // UI'ı güncelle - Eğer 1000m altındaysa Metre, üstündeyse KM göster
-    if (distanceInMeters >= 1000) {
-        const distanceInKm = (distanceInMeters / 1000).toFixed(2);
-        distanceResult.innerHTML = `${distanceInKm} <span>km</span>`;
+async function generateElevationProfile() {
+    // Interval ayarı alınır (Kullanıcı seçimi)
+    const intervalMeters = parseFloat(intervalSelect.value);
+    const intervalKm = intervalMeters / 1000;
+
+    const line = turf.lineString(markerCoords);
+    const lineLength = turf.length(line, { units: 'kilometers' });
+
+    // Turf.js ile çizgiyi belirlenen aralıklarla noktalara böleriz
+    let profilePoints = [];
+
+    // Mesafeye göre noktaları interpolasyonla
+    for (let dist = 0; dist <= lineLength; dist += intervalKm) {
+        const point = turf.along(line, dist, { units: 'kilometers' });
+        profilePoints.push({
+            distance: dist * 1000,
+            lng: point.geometry.coordinates[0],
+            lat: point.geometry.coordinates[1]
+        });
+    }
+
+    // Son noktayı (Bitiş noktasını) tam olarak ekleyelim (Eğer döngü dıșında kaldıysa)
+    const lastPointDist = lineLength * 1000;
+    if (profilePoints.length > 0 && Math.abs(profilePoints[profilePoints.length - 1].distance - lastPointDist) > 0.1) {
+        profilePoints.push({
+            distance: lastPointDist,
+            lng: markerCoords[1][0],
+            lat: markerCoords[1][1]
+        });
+    }
+
+    // Verilerin haritadan yüklenip render edilmesini bekle ki elevation değerleri gelsin
+    // Daha çok nokta varsa yavaşlayabilir ama client-side olarak MapLibre tile cache'nden okur
+    const graphData = [];
+
+    for (let i = 0; i < profilePoints.length; i++) {
+        const pt = profilePoints[i];
+
+        // map.queryTerrainElevation metodu belirtilen koordinattaki terrain verisini (Z değeri metre) döndürür
+        let ele = map.queryTerrainElevation([pt.lng, pt.lat]);
+        if (ele === null || ele === undefined) {
+            // Eğer yükseklik verisi o Tile için taranmamışsa 0 veya basit tutulur.
+            ele = 0;
+        }
+
+        graphData.push({
+            x: pt.distance, // x ekseni (Gidilen Mesafe - metre)
+            y: ele,         // y ekseni (Yükseklik/Kot - metre)
+            lng: pt.lng,
+            lat: pt.lat
+        });
+    }
+
+    drawChart(graphData);
+}
+
+function drawChart(data) {
+    const ctx = document.getElementById('elevationChart').getContext('2d');
+
+    // Alt paneli görünür yap
+    bottomPanel.classList.remove('hidden');
+
+    // Eğer eski grafik varsa sil (yeniden çizmek için)
+    if (elevationChart) {
+        elevationChart.destroy();
+    }
+
+    // Chart.js objesi oluştur
+    elevationChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            // X ekseni (Mesafeler)
+            labels: data.map(d => d.x.toFixed(0) + 'm'),
+            datasets: [{
+                label: 'Arazi Kot (Yükseklik - m)',
+                data: data.map(d => d.y),
+                borderColor: '#00d2ff',
+                backgroundColor: 'rgba(0, 210, 255, 0.2)', // Alan dolgusu
+                borderWidth: 2,
+                fill: true,
+                tension: 0.4, // Çizginin yumuşak/kıvrımlı olması
+                pointRadius: 0,
+                pointHoverRadius: 6,
+                pointBackgroundColor: '#ff4757',
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: {
+                mode: 'index',
+                intersect: false,
+            },
+            plugins: {
+                legend: { display: false }, // Lejantı gizle
+                tooltip: {
+                    callbacks: {
+                        label: function (context) {
+                            return ' Yükseklik: ' + context.parsed.y.toFixed(2) + 'm';
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    display: true,
+                    grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                    ticks: { color: '#a0a0a0', maxTicksLimit: 10 }
+                },
+                y: {
+                    display: true,
+                    title: { display: true, text: 'Z (Kot) - Metre', color: '#a0a0a0' },
+                    grid: { color: 'rgba(255, 255, 255, 0.1)' },
+                    ticks: { color: '#a0a0a0' }
+                }
+            },
+            onHover: (e, activeElements) => {
+                if (activeElements.length > 0) {
+                    const idx = activeElements[0].index;
+                    const pointInfo = data[idx];
+                    showHoverMarkerOnMap(pointInfo.lng, pointInfo.lat);
+                } else {
+                    hideHoverMarkerOnMap();
+                }
+            }
+        }
+    });
+
+    // Mouse Chart üzerinden çıkınca dinamik markeri gizle
+    document.getElementById('elevationChart').addEventListener('mouseleave', () => {
+        hideHoverMarkerOnMap();
+    });
+}
+
+function showHoverMarkerOnMap(lng, lat) {
+    if (!hoverMarker) {
+        const el = document.createElement('div');
+        el.className = 'hover-marker';
+        hoverMarker = new maplibregl.Marker({ element: el })
+            .setLngLat([lng, lat])
+            .addTo(map);
     } else {
-        distanceResult.innerHTML = `${distanceInMeters.toFixed(1)} <span>m</span>`;
+        hoverMarker.setLngLat([lng, lat]);
+    }
+}
+
+function hideHoverMarkerOnMap() {
+    if (hoverMarker) {
+        hoverMarker.remove();
+        hoverMarker = null;
     }
 }
 
 /* =========================================
-   6. KOORDİNAT SİSTEMİ DÖNÜŞÜMÜ VE KULLANICI ARAYÜZÜ (UI) GÜNCELLEMESİ
+   7. KOORDİNAT SİSTEMİ DÖNÜŞÜMÜ VE KULLANICI ARAYÜZÜ
    ========================================= */
 function updateCoordinateDisplays() {
-    // 1. Nokta için güncelleme
-    if (markers[0]) {
-        const p1 = markers[0].getLatLng();
-        p1CoordsText.innerText = convertAndFormatCoords(p1.lng, p1.lat, currentCrs);
+    if (markerCoords[0]) {
+        p1CoordsText.innerText = convertAndFormatCoords(markerCoords[0][0], markerCoords[0][1], currentCrs);
     } else {
         p1CoordsText.innerText = "-";
     }
 
-    // 2. Nokta için güncelleme
-    if (markers[1]) {
-        const p2 = markers[1].getLatLng();
-        p2CoordsText.innerText = convertAndFormatCoords(p2.lng, p2.lat, currentCrs);
+    if (markerCoords[1]) {
+        p2CoordsText.innerText = convertAndFormatCoords(markerCoords[1][0], markerCoords[1][1], currentCrs);
     } else {
         p2CoordsText.innerText = "-";
     }
@@ -124,35 +360,49 @@ function updateCoordinateDisplays() {
 
 function convertAndFormatCoords(lng, lat, targetCrs) {
     if (targetCrs === "EPSG:4326") {
-        // Enlem Boylam Formatı
         return `Enlem: ${lat.toFixed(6)} \nBoylam: ${lng.toFixed(6)}`;
     } else {
-        // XY (Easting, Northing) Dönüşümü
-        // Leaflet.js'den gelen değerler WGS84 (EPSG:4326) olduğu için oradan hedef sisteme dönüştürüyoruz
-        const result = proj4("EPSG:4326", targetCrs, [lng, lat]); // [X, Y]
+        const result = proj4("EPSG:4326", targetCrs, [lng, lat]);
         return `X: ${result[0].toFixed(3)} \nY: ${result[1].toFixed(3)}`;
     }
 }
 
 /* =========================================
-   7. SIFIRLA (TEMİZLE) İŞLEMİ
+   8. SIFIRLA (TEMİZLE) İŞLEMİ
    ========================================= */
-resetBtn.addEventListener('click', function() {
-    // Tüm marker'ları sil
-    markers.forEach(m => map.removeLayer(m));
+resetBtn.addEventListener('click', function () {
+    // Marker nesnelerini haritadan kaldır ve diziyi temizle
+    markers.forEach(m => m.remove());
     markers = [];
+    markerCoords = [];
 
-    // Çizgiyi sil
-    if (polyline) {
-        map.removeLayer(polyline);
-        polyline = null;
+    // Çizgiyi haritadan temizle
+    if (map.getSource('route')) {
+        map.getSource('route').setData({
+            'type': 'Feature',
+            'properties': {},
+            'geometry': {
+                'type': 'LineString',
+                'coordinates': []
+            }
+        });
     }
 
-    // Arayüzü/Uı sıfırla
+    // Arayüz sıfırlama
     p1CoordsText.innerText = "-";
     p2CoordsText.innerText = "-";
     distanceResult.innerHTML = "0.00 <span>km</span>";
-    
-    // (Bilinçli tercih: Harita zoomunu veya pozisyonunu ilk baştaki haline Geri ALMIYORUZ 
-    // ki kullanıcı kaldığı yerden başka ölçüm yapabilsin.)
+    bottomPanel.classList.add('hidden'); // Grafiği gizle
+
+    if (elevationChart) {
+        elevationChart.destroy();
+        elevationChart = null;
+    }
+
+    hideHoverMarkerOnMap();
+});
+
+// Çarpı (Kapat) butonu ile chartı gizleme
+closeChartBtn.addEventListener('click', () => {
+    bottomPanel.classList.add('hidden');
 });

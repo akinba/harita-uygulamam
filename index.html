@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Gerçek Mesafe ve Koordinat Hesaplama</title>
     
-    <!-- Leaflet CSS -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <!-- MapLibre GL CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.1.2/dist/maplibre-gl.css" />
     
     <!-- Google Fonts (Inter) -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -36,6 +36,17 @@
             </select>
         </div>
 
+        <div class="form-group">
+            <label for="intervalSelect">Ölçüm Aralığı (Metre)</label>
+            <select id="intervalSelect">
+                <option value="1">1 Metre</option>
+                <option value="5" selected>5 Metre</option>
+                <option value="10">10 Metre</option>
+                <option value="50">50 Metre</option>
+                <option value="100">100 Metre</option>
+            </select>
+        </div>
+
         <div class="info-box">
             <div class="point-info">
                 <strong>📍 1. Nokta:</strong>
@@ -57,10 +68,27 @@
         <p class="help-text">Harita üzerinde tıklayarak 2 nokta seçiniz.</p>
     </div>
 
-    <!-- Leaflet JS -->
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <!-- Alt Çizgi Grafiği Paneli -->
+    <div id="bottom-panel" class="bottom-panel glass-panel hidden">
+        <div class="panel-header">
+            <h3>Arazi Kesit Grafiği</h3>
+            <button id="closeChartBtn" class="close-btn">&times;</button>
+        </div>
+        <div class="chart-container">
+            <canvas id="elevationChart"></canvas>
+        </div>
+    </div>
+
+    <!-- MapLibre GL JS -->
+    <script src="https://unpkg.com/maplibre-gl@4.1.2/dist/maplibre-gl.js"></script>
     
-    <!-- Proj4js -->
+    <!-- Turf.js (Geometrik hesaplamalar için) -->
+    <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7/turf.min.js"></script>
+    
+    <!-- Chart.js (Grafik çizimi için) -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <!-- Proj4js (Koordinat Dönüşümleri) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.0/proj4.js"></script>
     
     <!-- Kendi JS dosyamız -->

@@ -191,3 +191,112 @@ body, html {
         padding: 15px;
     }
 }
+
+/* =========================================
+   ALT PANEL (CHART CONTAINER - GLASSMORPHISM)
+   ========================================= */
+.bottom-panel {
+    position: absolute;
+    bottom: 20px;
+    left: 20px;
+    right: 390px; /* Sağ taraftaki kontrol panele çarpmaması için */
+    height: 250px;
+    padding: 15px;
+    z-index: 1000;
+    
+    background: rgba(20, 20, 20, 0.7);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    box-shadow: 0 -8px 32px 0 rgba(0, 0, 0, 0.37);
+    color: #f1f1f1;
+    
+    display: flex;
+    flex-direction: column;
+    transition: transform 0.3s ease, opacity 0.3s ease;
+}
+
+.bottom-panel.hidden {
+    transform: translateY(150%);
+    opacity: 0;
+    pointer-events: none;
+}
+
+.panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.panel-header h3 {
+    font-size: 1.1rem;
+    font-weight: 500;
+    color: #00d2ff;
+    text-shadow: 0 0 10px rgba(0, 210, 255, 0.3);
+}
+
+.close-btn {
+    background: none;
+    border: none;
+    color: #fff;
+    font-size: 1.5rem;
+    cursor: pointer;
+    transition: color 0.2s;
+}
+
+.close-btn:hover {
+    color: #ff4757;
+}
+
+.chart-container {
+    flex: 1;
+    width: 100%;
+    position: relative;
+}
+
+/* Harita ve UI İyileştirmeleri */
+.maplibregl-popup-content {
+    background: rgba(30,30,30,0.9);
+    color: white;
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 8px;
+}
+
+.maplibregl-popup-close-button {
+    color: white;
+}
+
+.maplibregl-popup-anchor-bottom .maplibregl-popup-tip {
+    border-top-color: rgba(30,30,30,0.9);
+}
+
+/* Özel İşaretçi (Marker) Stili */
+.custom-marker {
+    background-color: #00d2ff;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    border: 2px solid white;
+    box-shadow: 0 0 10px #00d2ff;
+}
+
+/* Dinamik Harita İmleci (Chart üzerinde gezerken) */
+.hover-marker {
+    background-color: #ff4757;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    border: 3px solid white;
+    box-shadow: 0 0 15px #ff4757;
+    transition: transform 0.1s;
+}
+
+@media screen and (max-width: 800px) {
+    .bottom-panel {
+        right: 20px;
+        bottom: 250px; /* Kontrol paneli alttaysa, chart'ı biraz daha yukarı kaldır */
+        height: 200px;
+    }
+}
